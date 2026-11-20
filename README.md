@@ -1,23 +1,40 @@
-# opencode-btw-cloud
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-dark.svg">
+    <img src="docs/brand/logo-light.svg" alt="opencode-btw-cloud" width="440">
+  </picture>
+</p>
 
-**Ask `/btw` side questions in [OpenCode](https://opencode.ai) with any model you choose — e.g. a fast cloud model while your main session runs on a local LLM.**
+<h3 align="center">Ask side questions without waiting on your local model.</h3>
+<p align="center"><code>/btw</code> for <a href="https://opencode.ai">OpenCode</a>, answered by any model you choose: a fast cloud model, while your main session keeps running on llama.cpp, Ollama or LM Studio.</p>
 
-Running OpenCode on a local model (llama.cpp, Ollama, LM Studio, vLLM…)? The built-in `/btw` answers with the *session's* model, so a quick side question has to wait for your GPU to finish the current turn — and then competes with it. `opencode-btw-cloud` adds `/btw-cloud`, which answers the same kind of question from the same session context using a model **you** pick (any provider OpenCode knows about), without touching your main session or your GPU.
+<p align="center">
+  <a href="#features">Features</a> · <a href="#install"><b>Install</b></a> ·
+  <a href="#how-it-works">How it works</a> · <a href="#privacy">Privacy</a> ·
+  <a href="#limitations">Limitations</a>
+</p>
 
-```
-/btw-cloud what did we decide about the retry logic?
+<p align="center">
+  <a href="https://github.com/exie1122/opencode-btw-cloud/stargazers"><img src="https://img.shields.io/github/stars/exie1122/opencode-btw-cloud?style=flat&color=3b6cf6" alt="GitHub stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/exie1122/opencode-btw-cloud?color=3b6cf6" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/OpenCode-2.3%2B-3b6cf6" alt="OpenCode 2.3+">
+  <img src="https://img.shields.io/badge/plugin-TUI-3b6cf6" alt="TUI plugin">
+  <a href="https://github.com/exie1122/opencode-btw-cloud/commits/main"><img src="https://img.shields.io/github/last-commit/exie1122/opencode-btw-cloud?color=3b6cf6" alt="Last commit"></a>
+</p>
+
+<p align="center">
+  <img src="docs/media/demo.png" alt="The /btw-cloud popup answering a side question over an OpenCode session" width="860">
+</p>
+
+**Free, open source, one command to install.** No API keys of its own, no telemetry. It uses the providers you already have in OpenCode.
+
+```sh
+opencode plugin add github:exie1122/opencode-btw-cloud
 ```
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ /btw-cloud  what did we decide about the retry logic?            esc │
-│                                                                      │
-│  Exponential backoff capped at 30s, max 5 attempts, and only for     │
-│  idempotent requests — see `src/http/retry.ts`.                      │
-│                                                                      │
-│ c copy  o open as session  j/k scroll  ·  deepseek-v4.1-flash-free   │
-└──────────────────────────────────────────────────────────────────────┘
-```
+## Why
+
+The built-in `/btw` answers with the *session's* model. When that model runs locally, a quick side question has to wait for your GPU to finish the current turn, and then competes with it. `/btw-cloud` answers the same kind of question from the same session context, using a model **you** pick from any provider OpenCode knows about. Your main session and your GPU are left alone.
 
 ## Features
 
@@ -57,6 +74,8 @@ Or from a local clone — add it to the `plugins` list in `~/.config/opencode/cl
   "plugins": ["file:///absolute/path/to/opencode-btw-cloud"]
 }
 ```
+
+To get updates later: `opencode plugin update`.
 
 Restart OpenCode, then run `/btw-cloud-model` once to choose a model (or just run `/btw-cloud` — it asks the first time).
 

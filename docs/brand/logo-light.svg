@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="112" viewBox="0 0 520 112" role="img" aria-label="opencode-btw-cloud">
+  <!-- icon: speech bubble with a cloud -->
+  <rect x="8" y="10" width="92" height="92" rx="22" fill="#3b6cf6"/>
+  <path d="M30 34h48a8 8 0 0 1 8 8v22a8 8 0 0 1-8 8H50l-12 10v-10h-8a8 8 0 0 1-8-8V42a8 8 0 0 1 8-8z" fill="#ffffff" fill-opacity="0.95"/>
+  <path d="M41 62h26a7 7 0 0 0 1-13.9A10 10 0 0 0 49 46a8 8 0 0 0-8 16z" fill="#3b6cf6"/>
+  <!-- wordmark -->
+  <text x="124" y="58" font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', 'Fira Mono', Menlo, Consolas, monospace" font-size="34" font-weight="700" fill="#1f2328">/btw-cloud</text>
+  <text x="126" y="88" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="17" fill="#59636e">side questions for OpenCode, on any model</text>
+</svg>
