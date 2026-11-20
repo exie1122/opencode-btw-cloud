@@ -1,0 +1,40 @@
+{
+  "name": "opencode-btw-cloud",
+  "version": "0.1.0",
+  "description": "Ask /btw side questions in OpenCode with any model you choose, e.g. a fast cloud model while your main session runs on a local LLM (llama.cpp, Ollama, LM Studio).",
+  "type": "module",
+  "license": "MIT",
+  "author": "exie1122",
+  "homepage": "https://github.com/exie1122/opencode-btw-cloud#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/exie1122/opencode-btw-cloud.git"
+  },
+  "bugs": {
+    "url": "https://github.com/exie1122/opencode-btw-cloud/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opencode-tui-plugin",
+    "btw",
+    "side-question",
+    "local-llm",
+    "llama.cpp",
+    "ollama",
+    "lm-studio",
+    "cloud-model",
+    "ai-coding-agent"
+  ],
+  "exports": {
+    "./tui": "./tui.tsx"
+  },
+  "files": [
+    "tui.tsx",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "opencode": ">=2.3.0"
+  }
+}

@@ -1,0 +1,29 @@
+# Secrets / local env — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+auth.json
+service.json
+credentials*.json
+.npmrc
+
+# OpenCode local state / config
+.opencode/
+cli.json
+opencode.json
+opencode.jsonc
+
+# Dependencies & build output
+node_modules/
+dist/
+*.tgz
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.log
