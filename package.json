@@ -1,6 +1,6 @@
 {
   "name": "opencode-btw-cloud",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Ask /btw side questions in OpenCode with any model you choose, e.g. a fast cloud model while your main session runs on a local LLM (llama.cpp, Ollama, LM Studio).",
   "type": "module",
   "license": "MIT",

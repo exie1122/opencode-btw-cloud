@@ -41,16 +41,19 @@ The built-in `/btw` answers with the *session's* model. When that model runs loc
 - **`/btw-cloud <question>`** — answer in a floating popup that looks like the built-in `/btw`: themed markdown, syntax-highlighted code, tables. Nothing is added to your conversation.
 - **Follow-up questions** — press `f` in the popup to keep the side thread going. Each follow-up sees the earlier side questions and answers.
 - **`/btw-cloud-model`** — searchable picker of every model OpenCode can use, grouped by provider. Your choice is remembered.
+- **`/btw-cloud-settings`** — one screen for the model, history attribution and answer stats. `↑`/`↓` move, `space` toggles, `enter` saves, `esc` cancels.
+- **Answer stats** — under each answer, like OpenCode's own line under a reply: response time, tokens per second, context used (with % of the model's window) and cost. Each one can be turned off in `/btw-cloud-settings`.
+- **Knows who wrote the history** — the side model is told that the main session's model (e.g. your local Qwen) wrote the earlier replies, so it reviews that work as an outsider instead of defending it as its own. You can turn this off.
 - **Full native context** — the answering model sees the real session history (messages, tool calls and results), not a lossy text summary.
 - **Never blocks your local model** — your local server keeps generating; the side question runs elsewhere.
 - **`o` to open as a session** — turn the side thread into a real session on the side model (history + the side Q&A) and keep working there.
-- `c` copies the latest answer (OSC 52), `j`/`k`/arrows/PgUp/PgDn scroll, `esc` closes.
+- `c` copies the latest answer (OSC 52), `j`/`k`/arrows/PgUp/PgDn or the mouse wheel scroll, and you can drag the scrollbar like in OpenCode's chat. `esc` closes.
 
 ## How it works
 
 1. Fork the current session (OpenCode copies the history server-side; it takes milliseconds).
 2. Switch the fork to your chosen model.
-3. Run `session.generate` on the fork — the same one-shot, tool-free call the built-in `/btw` uses, with the same instruction.
+3. Run `session.generate` on the fork — the same one-shot, tool-free call the built-in `/btw` uses, with the same instruction plus a note naming the model(s) that wrote the earlier replies.
 4. Show the answer. Follow-ups (`f`) run on the same fork, with the side thread included in the prompt.
 5. Delete the fork when the popup closes. Pressing `o` keeps it instead, adds the side thread as a message, and opens it.
 
@@ -95,11 +98,30 @@ If you'd rather not use the picker, pass the model as a plugin option:
 
 A model chosen with `/btw-cloud-model` takes precedence over the option.
 
+### History attribution
+
+A chat model reads every earlier assistant message as its own reply. Without help, a side model looking at a session your local model ran would say things like "the code I wrote", and review that work as if it were its own. By default, `/btw-cloud` adds a short note telling the side model which model(s) wrote the earlier replies (read from the session's messages) and asking it to answer as a separate, outside reviewer. The history itself is passed unchanged.
+
+If you'd rather the side model carry on as though it were the main assistant (the same thing OpenCode does when you switch models mid-session), turn **Tell side model who wrote history** off in `/btw-cloud-settings`, or set `"attribution": false` in the plugin options. The setting in `/btw-cloud-settings` takes precedence over the option.
+
+### Answer stats
+
+Shown under each answer, e.g. `5.3s · 84.0 tok/s · 9.4K (5%) · $0.00`:
+
+| Stat | Meaning |
+|---|---|
+| Response time | How long the answer took. |
+| Tokens per second | Output tokens over the whole request, so it runs a little lower than OpenCode's own figure (which excludes the wait for the first token). |
+| Context used | Tokens the side model used, and the share of its context window. |
+| Cost | As reported by the provider; `$0.00` for free models. |
+
+Turn any of them off in `/btw-cloud-settings`, or set them in the plugin options, e.g. `"stats": { "cost": false }`.
+
 ## Privacy
 
 `/btw-cloud` sends your session's context (the same content your main model sees) to the model you select. If you chose a cloud model, that content leaves your machine for that provider — just like OpenCode's compaction does when it's configured with a cloud model. If you need everything to stay local, pick a local model or use the built-in `/btw`.
 
-The plugin itself stores only your chosen model ID and the IDs of temporary forks awaiting cleanup in OpenCode's local state directory. It has no telemetry, no network calls of its own, and no credentials — all requests go through your OpenCode server using the providers you've already configured.
+The plugin itself stores only your chosen model ID, your settings, and the IDs of temporary forks awaiting cleanup in OpenCode's local state directory. It has no telemetry, no network calls of its own, and no credentials — all requests go through your OpenCode server using the providers you've already configured.
 
 ## Limitations
 

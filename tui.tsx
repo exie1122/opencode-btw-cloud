@@ -5,8 +5,9 @@
 // How a question is answered:
 //   1. fork the current session (copies the full native history, ~instant)
 //   2. switch the fork to the chosen model
-//   3. session.generate on the fork (the same one-shot, tool-free call /btw uses)
-//   4. show the answer in a popup; "f" asks a follow-up on the same fork
+//   3. session.generate on the fork (the same one-shot, tool-free call /btw uses),
+//      noting which model(s) wrote the history unless turned off in /btw-cloud-settings
+//   4. show the answer in a popup (with optional stats); "f" asks a follow-up on the same fork
 //   5. delete the fork when the popup closes
 //      (or press "o" to keep it, with the side thread added, and open it)
 // The main session, its model and its local KV cache are never touched.
@@ -26,6 +27,20 @@ const PREAMBLE = [
   "Do not call any tools and do not take any actions.",
 ].join(" ")
 
+// Without this note, the side model reads the session's earlier assistant
+// messages as its own replies (the chat format has no "written by another
+// model" marker) and answers as if it had done that work itself.
+const attributionNote = (authors: string[], side: ModelRef) =>
+  [
+    `Note: the earlier assistant messages in this conversation were not written by you.`,
+    `They were written by the main session's assistant (${authors.join(", ")}).`,
+    authors.includes(label(side)) ? "Where that is the same model as you, it was a separate run; you did not write them." : "",
+    `You are ${label(side)}, a separate model brought in only to answer this side question.`,
+    `Refer to that work as the main assistant's, not as your own, and when asked to review or critique it, do so as an outside reviewer.`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+
 const unwrap = <T,>(r: any): T => (r && typeof r === "object" && "data" in r && Object.keys(r).length <= 2 ? r.data : r)
 
 const parseModel = (s: unknown): ModelRef | undefined => {
@@ -37,7 +52,33 @@ const parseModel = (s: unknown): ModelRef | undefined => {
 
 const label = (m: ModelRef) => `${m.providerID}/${m.id}`
 
-type Turn = { q: string; a?: string; error?: string }
+// Measured for each answer; which of them are shown is set in /btw-cloud-settings.
+type Stats = { seconds: number; output: number; context: number; limit?: number; cost?: number }
+type Turn = { q: string; a?: string; error?: string; stats?: Stats }
+
+type StatKey = "time" | "speed" | "context" | "cost"
+type Settings = { attribution: boolean; stats: Record<StatKey, boolean> }
+const STATS: { key: StatKey; title: string }[] = [
+  { key: "time", title: "Response time" },
+  { key: "speed", title: "Tokens per second" },
+  { key: "context", title: "Context used" },
+  { key: "cost", title: "Cost" },
+]
+
+const fmtTokens = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(Math.round(n))
+
+// "3.2s · 85.1 tok/s · 9.1K (5%) · $0.0012", like OpenCode's line under each reply.
+const statsLine = (s: Stats | undefined, show: Record<StatKey, boolean>) => {
+  if (!s) return ""
+  const parts: string[] = []
+  if (show.time) parts.push(`${s.seconds.toFixed(1)}s`)
+  if (show.speed && s.output > 0 && s.seconds > 0) parts.push(`${(s.output / s.seconds).toFixed(1)} tok/s`)
+  if (show.context && s.context > 0)
+    parts.push(s.limit ? `${fmtTokens(s.context)} (${Math.round((s.context / s.limit) * 100)}%)` : fmtTokens(s.context))
+  if (show.cost && s.cost !== undefined) parts.push(s.cost > 0 && s.cost < 0.01 ? `$${s.cost.toFixed(4)}` : `$${s.cost.toFixed(2)}`)
+  return parts.join(" · ")
+}
 
 // Markdown/code styling built from the active theme, mirroring the mapping
 // OpenCode uses for its own markdown (headings, emphasis, code, links, syntax).
@@ -88,9 +129,49 @@ export default Plugin.define({
     const [pending, setPending] = createSignal(0)
 
     // Persisted choice from /btw-cloud-model; falls back to the plugin's `model` option.
-    const [saved, setSaved] = context.storage.store("settings", { initial: { model: null as string | null } })
+    // `attribution` (default on): tell the side model that the main session's model wrote the history.
+    // `stats` (each default on): which numbers to show under each answer.
+    const [saved, setSaved] = context.storage.store("settings", {
+      initial: { model: null as string | null, attribution: null as boolean | null, stats: {} as Partial<Record<StatKey, boolean>> },
+    })
     const read = () => (typeof saved === "function" ? saved() : saved)
     const currentModel = (): ModelRef | undefined => parseModel(read()?.model) ?? parseModel(context.options?.model)
+    const settings = (): Settings => {
+      const s = read() ?? {}
+      const opt = context.options ?? {}
+      return {
+        attribution: s.attribution ?? opt.attribution ?? true,
+        stats: Object.fromEntries(STATS.map(({ key }) => [key, s.stats?.[key] ?? opt.stats?.[key] ?? true])) as Record<StatKey, boolean>,
+      }
+    }
+    const saveSettings = (next: Settings) =>
+      setSaved((s: any) => {
+        s.attribution = next.attribution
+        s.stats = { ...next.stats }
+      })
+
+    // Models that wrote the session's assistant messages, in order of first appearance.
+    const historyAuthors = async (sessionID: string): Promise<string[]> => {
+      const collect = () => {
+        const seen = new Set<string>()
+        for (const m of (context.data.session.message.list(sessionID) ?? []) as any[]) {
+          if (m?.type === "assistant" && m.model?.providerID && m.model?.id) seen.add(label(m.model))
+        }
+        return [...seen]
+      }
+      try {
+        let authors = collect()
+        if (authors.length === 0) {
+          await context.data.session.message.sync(sessionID)
+          authors = collect()
+        }
+        if (authors.length > 0) return authors
+        const m = context.data.session.get(sessionID)?.model
+        return m?.providerID && m?.id ? [label(m)] : []
+      } catch {
+        return []
+      }
+    }
 
     const toast = (message: string, variant = "info") => context.ui.toast.show({ title: "/btw-cloud", message, variant })
 
@@ -181,19 +262,40 @@ export default Plugin.define({
       let forkID: string | undefined
       let closed = false
       let kept = false
+      let note = ""
+      // the side model's context window, for the "context used" percentage
+      const contextLimit: Promise<number | undefined> = context.client.model
+        .list()
+        .then((r: any) => unwrap<any[]>(r)?.find((m: any) => m.providerID === model.providerID && m.id === model.id)?.limit?.context)
+        .catch(() => undefined)
 
       const answer = async (q: string, history: Turn[]) => {
         const prompt =
           history.length === 0
-            ? [PREAMBLE, q].join("\n\n")
+            ? [PREAMBLE, note, q].filter(Boolean).join("\n\n")
             : [
                 PREAMBLE,
+                note,
                 "This is a follow-up in an ongoing side conversation. Earlier side questions and your answers:",
                 history.map((t) => `Q: ${t.q}\n\nA: ${t.a ?? t.error ?? ""}`).join("\n\n---\n\n"),
                 `Follow-up question: ${q}`,
-              ].join("\n\n")
+              ]
+                .filter(Boolean)
+                .join("\n\n")
+        const started = performance.now()
         const res = unwrap<any>(await context.client.session.generate({ sessionID: forkID, prompt }))
-        return String(res?.text ?? "").trim() || "_(empty response)_"
+        const seconds = (performance.now() - started) / 1000
+        const tk = res?.tokens ?? {}
+        const output = (tk.output ?? 0) + (tk.reasoning ?? 0)
+        const stats: Stats = {
+          seconds,
+          output,
+          // counted the way OpenCode's context meter does: everything in the request plus the reply
+          context: (tk.input ?? 0) + (tk.cache?.read ?? 0) + (tk.cache?.write ?? 0) + output,
+          limit: await contextLimit,
+          cost: typeof res?.cost === "number" ? res.cost : undefined,
+        }
+        return { a: String(res?.text ?? "").trim() || "_(empty response)_", stats }
       }
 
       const setLast = (patch: Partial<Turn>) =>
@@ -206,8 +308,8 @@ export default Plugin.define({
         setBusy(true)
         setPending((n) => n + 1)
         try {
-          const a = await answer(q, history)
-          if (!closed) setLast({ a })
+          const r = await answer(q, history)
+          if (!closed) setLast(r)
         } catch (err: any) {
           if (!closed) setLast({ error: String(err?.message ?? err) })
         } finally {
@@ -243,9 +345,12 @@ export default Plugin.define({
       }
 
       try {
+        if (settings().attribution) {
+          const authors = await historyAuthors(sessionID)
+          if (authors.length > 0) note = attributionNote(authors, model)
+        }
         forkID = await forkOnto(sessionID, model)
-        const a = await answer(question, [])
-        setLast({ a })
+        setLast(await answer(question, []))
       } catch (err: any) {
         if (forkID) await removeFork(forkID).catch(() => {})
         toast(String(err?.message ?? err), "error")
@@ -262,6 +367,7 @@ export default Plugin.define({
             context={context}
             model={model}
             turns={turns}
+            show={() => settings().stats}
             busy={busy}
             style={style}
             onFollowUp={followUp}
@@ -275,6 +381,30 @@ export default Plugin.define({
         },
       )
       context.ui.dialog.set({ size: "large", centered: true })
+    }
+
+    // /btw-cloud-settings. Toggles are edited on a draft; enter saves it, esc discards it.
+    // Choosing "Model" opens the model picker, then comes back here with the draft intact.
+    const openSettings = (draft: Settings = settings(), selected = 0) => {
+      context.ui.dialog.show(() => (
+        <SettingsView
+          context={context}
+          draft={draft}
+          selected={selected}
+          model={() => currentModel()}
+          onSave={async (next) => {
+            context.ui.dialog.clear()
+            await saveSettings(next)
+            toast("Settings saved", "success")
+          }}
+          onPickModel={async (next, at) => {
+            context.ui.dialog.clear()
+            await pickModel()
+            openSettings(next, at)
+          }}
+        />
+      ))
+      context.ui.dialog.set({ size: "medium", centered: true })
     }
 
     context.keymap.layer(() => ({
@@ -309,15 +439,43 @@ export default Plugin.define({
             await pickModel()
           },
         },
+        {
+          id: `${ID}.settings`,
+          title: "/btw-cloud settings",
+          description: "Model, history attribution and answer stats for /btw-cloud side questions",
+          group: "Session",
+          palette: true,
+          slash: { name: "btw-cloud-settings" },
+          run() {
+            openSettings()
+          },
+        },
       ],
     }))
   },
 })
 
+// The same vertical scrollbar OpenCode puts on its chat: wheel, arrow keys, or drag the thumb.
+const scrollbar = (t: any, track: any) => ({
+  visible: true,
+  paddingLeft: 1,
+  trackOptions: { backgroundColor: track, foregroundColor: t?.scrollbar?.base ?? t?.border?.base ?? t?.text?.muted },
+})
+
+function KeyHint(p: { label: string; keys: string; fg: any; muted: any }) {
+  return (
+    <box flexDirection="row" gap={1} flexShrink={0}>
+      <text fg={p.fg}>{p.label}</text>
+      <text fg={p.muted}>{p.keys}</text>
+    </box>
+  )
+}
+
 function AnswerView(props: {
   context: any
   model: ModelRef
   turns: Accessor<Turn[]>
+  show: () => Record<StatKey, boolean>
   busy: Accessor<boolean>
   style: SyntaxStyle
   onFollowUp: (q: string) => void
@@ -383,12 +541,7 @@ function AnswerView(props: {
     if (key.name === "end") return box.scrollTo(box.scrollHeight)
   })
 
-  const Hint = (p: { label: string; keys: string }) => (
-    <box flexDirection="row" gap={1} flexShrink={0}>
-      <text fg={base}>{p.label}</text>
-      <text fg={muted}>{p.keys}</text>
-    </box>
-  )
+  const Hint = (p: { label: string; keys: string }) => <KeyHint label={p.label} keys={p.keys} fg={base} muted={muted} />
 
   return (
     <box flexDirection="column">
@@ -413,10 +566,10 @@ function AnswerView(props: {
         ref={(el: any) => (box = el)}
         maxHeight={Math.max(8, Math.floor(dims().height * 0.6))}
         contentOptions={{ minHeight: 0 }}
-        scrollbarOptions={{ visible: false }}
+        verticalScrollbarOptions={scrollbar(t, raised)}
         backgroundColor={raised}
       >
-        <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1}>
+        <box flexDirection="column" paddingLeft={2} paddingRight={1} paddingTop={1} paddingBottom={1} gap={1}>
           <For each={props.turns()}>
             {(turn, i) => (
               <box flexDirection="column" gap={1}>
@@ -447,6 +600,9 @@ function AnswerView(props: {
                     fg={t?.markdown?.text ?? base}
                     bg={raised}
                   />
+                  <Show when={statsLine(turn.stats, props.show())}>
+                    {(line) => <text fg={muted}>{line()}</text>}
+                  </Show>
                 </Show>
               </box>
             )}
@@ -465,7 +621,7 @@ function AnswerView(props: {
                 <Hint label="follow-up" keys="f" />
               </Show>
               <Hint label="open as session" keys="o" />
-              <Hint label="scroll" keys="j/k ↑/↓" />
+              <Hint label="scroll" keys="j/k ↑/↓ drag" />
             </>
           }
         >
@@ -480,6 +636,184 @@ function AnswerView(props: {
             onSubmit={(v: any) => submit(typeof v === "string" ? v : undefined)}
           />
         </Show>
+      </box>
+    </box>
+  )
+}
+
+type SettingsRow =
+  | { kind: "header"; title: string }
+  | { kind: "model"; title: string; help: string }
+  | { kind: "toggle"; title: string; help: string; get: (d: Settings) => boolean; set: (d: Settings, v: boolean) => Settings }
+
+const SETTINGS_ROWS: SettingsRow[] = [
+  { kind: "header", title: "Side model" },
+  { kind: "model", title: "Model", help: "Which model answers /btw-cloud side questions. Space opens the picker." },
+  { kind: "header", title: "Behavior" },
+  {
+    kind: "toggle",
+    title: "Tell side model who wrote history",
+    help: "On: it knows the main session's model wrote the earlier replies and reviews them as an outsider. Off: it treats them as its own.",
+    get: (d) => d.attribution,
+    set: (d, v) => ({ ...d, attribution: v }),
+  },
+  { kind: "header", title: "Stats under each answer" },
+  ...STATS.map(
+    ({ key, title }): SettingsRow => ({
+      kind: "toggle",
+      title,
+      help: {
+        time: "How long the answer took.",
+        speed: "Output tokens per second, over the whole request (so a little lower than OpenCode's own figure).",
+        context: "Tokens the side model used, and the share of its context window.",
+        cost: "What the answer cost, as reported by the provider ($0.00 for free models).",
+      }[key],
+      get: (d) => d.stats[key],
+      set: (d, v) => ({ ...d, stats: { ...d.stats, [key]: v } }),
+    }),
+  ),
+]
+
+function SettingsView(props: {
+  context: any
+  draft: Settings
+  selected: number
+  model: () => ModelRef | undefined
+  onSave: (next: Settings) => void
+  onPickModel: (next: Settings, selected: number) => void
+}) {
+  const t = props.context.theme.surface?.("dialog") ?? props.context.theme
+  const raised = t?.background?.raised?.high
+  const muted = t?.text?.muted
+  const base = t?.text?.base
+  const blue = t?.hue?.blue?.[400] ?? props.context.theme?.hue?.blue?.[400] ?? "#4c8dff"
+  const dims = useTerminalDimensions()
+  const [draft, setDraft] = createSignal<Settings>({ ...props.draft, stats: { ...props.draft.stats } })
+
+  // indexes of the selectable rows (everything but headers)
+  const items = SETTINGS_ROWS.flatMap((r, i) => (r.kind === "header" ? [] : [i]))
+  const [sel, setSel] = createSignal(Math.max(0, Math.min(props.selected, items.length - 1)))
+  const current = () => SETTINGS_ROWS[items[sel()]] as Exclude<SettingsRow, { kind: "header" }>
+  const refs: any[] = []
+  let box: any
+  // ignore the enter that opened this dialog
+  let ready = false
+  setTimeout(() => (ready = true), 50)
+
+  const act = (k = sel()) => {
+    const row = SETTINGS_ROWS[items[k]]
+    if (row.kind === "model") return props.onPickModel(draft(), k)
+    if (row.kind === "toggle") setDraft((d) => row.set(d, !row.get(d)))
+  }
+  const select = (k: number) => {
+    const next = Math.max(0, Math.min(items.length - 1, k))
+    setSel(next)
+    const el = refs[items[next]]
+    if (el) box?.scrollChildIntoView?.(el)
+  }
+
+  useKeyboard((key: any) => {
+    if (!ready) return
+    if (key.name === "up" || key.name === "k") return select(sel() - 1)
+    if (key.name === "down" || key.name === "j") return select(sel() + 1)
+    if (key.name === "home") return select(0)
+    if (key.name === "end") return select(items.length - 1)
+    if (key.name === "space") return act()
+    if (key.name === "return" || key.name === "enter") return props.onSave(draft())
+  })
+
+  const Hint = (p: { label: string; keys: string }) => <KeyHint label={p.label} keys={p.keys} fg={base} muted={muted} />
+
+  return (
+    <box flexDirection="column">
+      <box flexDirection="row" gap={2} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
+        <text fg={base} attributes={1} flexGrow={1}>
+          /btw-cloud settings
+        </text>
+        <text fg={muted} flexShrink={0}>
+          esc
+        </text>
+      </box>
+
+      <scrollbox
+        ref={(el: any) => (box = el)}
+        maxHeight={Math.max(6, Math.floor(dims().height * 0.5))}
+        contentOptions={{ minHeight: 0 }}
+        verticalScrollbarOptions={scrollbar(t, raised)}
+        backgroundColor={raised}
+      >
+        <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}>
+          <For each={SETTINGS_ROWS}>
+            {(row, i) => {
+              if (row.kind === "header")
+                return (
+                  <box paddingLeft={1} paddingTop={1} ref={(el: any) => (refs[i()] = el)}>
+                    <text fg={muted} attributes={1}>
+                      {row.title}
+                    </text>
+                  </box>
+                )
+              const k = items.indexOf(i())
+              const on = () => sel() === k
+              return (
+                <box
+                  ref={(el: any) => (refs[i()] = el)}
+                  flexDirection="row"
+                  gap={1}
+                  onMouseDown={() => {
+                    setSel(k)
+                    act(k)
+                  }}
+                >
+                  <text fg={blue} flexShrink={0}>
+                    {on() ? "▌" : " "}
+                  </text>
+                  <Show
+                    when={row.kind === "toggle" ? row : undefined}
+                    fallback={
+                      <>
+                        <text fg={muted} flexShrink={0}>
+                          ›
+                        </text>
+                        <text fg={base} attributes={on() ? 1 : 0} flexGrow={1}>
+                          {row.title}
+                        </text>
+                        <text fg={muted} wrapMode="none" truncate flexShrink={1}>
+                          {(() => {
+                            const m = props.model()
+                            return m ? label(m) : "not set"
+                          })()}
+                        </text>
+                      </>
+                    }
+                  >
+                    {(tog) => (
+                      <>
+                        <text fg={tog().get(draft()) ? blue : muted} flexShrink={0}>
+                          {tog().get(draft()) ? "●" : "○"}
+                        </text>
+                        <text fg={base} attributes={on() ? 1 : 0} flexGrow={1}>
+                          {tog().title}
+                        </text>
+                      </>
+                    )}
+                  </Show>
+                </box>
+              )
+            }}
+          </For>
+        </box>
+      </scrollbox>
+
+      <box paddingLeft={2} paddingRight={2} paddingTop={1}>
+        <text fg={muted}>{current().help}</text>
+      </box>
+
+      <box flexDirection="row" gap={2} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
+        <Hint label="move" keys="↑/↓" />
+        <Hint label={current().kind === "model" ? "change model" : "toggle"} keys="space" />
+        <Hint label="save" keys="enter" />
+        <Hint label="cancel" keys="esc" />
       </box>
     </box>
   )
