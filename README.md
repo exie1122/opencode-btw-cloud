@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/demo.png" alt="The /btw-cloud popup answering a side question over an OpenCode session" width="860">
+  <img src="docs/media/demo.png" alt="The /btw-cloud popup answering a side question and a follow-up over an OpenCode session" width="860">
 </p>
 
 **Free, open source, one command to install.** No API keys of its own, no telemetry. It uses the providers you already have in OpenCode.
@@ -38,21 +38,23 @@ The built-in `/btw` answers with the *session's* model. When that model runs loc
 
 ## Features
 
-- **`/btw-cloud <question>`** — one-shot answer in a floating popup, like `/btw`. Nothing is added to your conversation.
+- **`/btw-cloud <question>`** — answer in a floating popup that looks like the built-in `/btw`: themed markdown, syntax-highlighted code, tables. Nothing is added to your conversation.
+- **Follow-up questions** — press `f` in the popup to keep the side thread going. Each follow-up sees the earlier side questions and answers.
 - **`/btw-cloud-model`** — searchable picker of every model OpenCode can use, grouped by provider. Your choice is remembered.
 - **Full native context** — the answering model sees the real session history (messages, tool calls and results), not a lossy text summary.
 - **Never blocks your local model** — your local server keeps generating; the side question runs elsewhere.
-- **`o` to open as a session** — open a copy of the session on the side model and keep working there.
-- `c` copies the answer (OSC 52), `j`/`k`/arrows/PgUp/PgDn scroll, `esc` closes.
+- **`o` to open as a session** — turn the side thread into a real session on the side model (history + the side Q&A) and keep working there.
+- `c` copies the latest answer (OSC 52), `j`/`k`/arrows/PgUp/PgDn scroll, `esc` closes.
 
 ## How it works
 
 1. Fork the current session (OpenCode copies the history server-side; it takes milliseconds).
 2. Switch the fork to your chosen model.
 3. Run `session.generate` on the fork — the same one-shot, tool-free call the built-in `/btw` uses, with the same instruction.
-4. Delete the fork and show the answer. Pressing `o` opens a *fresh* fork on the side model as a normal session.
+4. Show the answer. Follow-ups (`f`) run on the same fork, with the side thread included in the prompt.
+5. Delete the fork when the popup closes. Pressing `o` keeps it instead, adds the side thread as a message, and opens it.
 
-Your main session, its model and its local KV cache are never modified. The temporary fork may flash in the session list for the second or two it exists. If OpenCode exits mid-question, the leftover fork is removed automatically the next time OpenCode starts.
+Your main session, its model and its local KV cache are never modified. The temporary fork shows in the session list while the popup is open. If OpenCode exits with a side question open, the leftover fork is removed automatically the next time OpenCode starts.
 
 ## Requirements
 
@@ -97,13 +99,12 @@ A model chosen with `/btw-cloud-model` takes precedence over the option.
 
 `/btw-cloud` sends your session's context (the same content your main model sees) to the model you select. If you chose a cloud model, that content leaves your machine for that provider — just like OpenCode's compaction does when it's configured with a cloud model. If you need everything to stay local, pick a local model or use the built-in `/btw`.
 
-The plugin itself stores only one setting (your chosen model ID) in OpenCode's local state directory. It has no telemetry, no network calls of its own, and no credentials — all requests go through your OpenCode server using the providers you've already configured.
+The plugin itself stores only your chosen model ID and the IDs of temporary forks awaiting cleanup in OpenCode's local state directory. It has no telemetry, no network calls of its own, and no credentials — all requests go through your OpenCode server using the providers you've already configured.
 
 ## Limitations
 
-- Relies on OpenCode's v2 plugin API and the `session.fork` / `session.switchModel` / `session.generate` endpoints; a future OpenCode release could change them.
-- Code blocks in answers get basic styling rather than full theme syntax highlighting.
-- A session opened with `o` contains the history up to the side question; the side question and answer themselves are not added to it.
+- Relies on OpenCode's v2 plugin API and the `session.fork` / `session.switchModel` / `session.generate` / `session.synthetic` endpoints; a future OpenCode release could change them.
+- `esc` closes the whole popup, including while you're typing a follow-up.
 - Clipboard copy needs a terminal with OSC 52 support.
 
 ## Uninstall
